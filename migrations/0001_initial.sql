@@ -42,8 +42,8 @@ CREATE VIRTUAL TABLE documents_fts USING fts5(
     summary,
     body_text,
     author,
-    content=documents,
-    content_rowid=id
+    content='documents',
+    content_rowid='id'
 );
 
 -- Triggers to keep FTS index updated

@@ -172,11 +172,214 @@ router.get('/api/search', async (request, env) => {
     });
 });
 
-// Add other routes here...
+// Document view
+router.get('/api/docs/:id', async (request, env) => {
+    const { id } = request.params;
+    const user = await verifyAuth(request, env);
+    
+    const doc = await env.DB.prepare(`
+        SELECT * FROM documents WHERE id = ?
+    `).bind(id).first();
+    
+    if (!doc) return new Response('Not found', { status: 404 });
+    
+    // Check visibility
+    if (doc.visibility === 'private' && (!user || user.sub !== doc.created_by)) {
+        return new Response('Forbidden', { status: 403 });
+    }
+    
+    // Generate signed URL for download
+    const url = await env.MY_R2.getSignedUrl(doc.r2_key, { expiresIn: 3600 });
+    
+    return Response.json({
+        ...doc,
+        download_url: url
+    });
+});
+
+// Favorites
+router.get('/api/user/favorites', async (request, env) => {
+    const user = await verifyAuth(request, env);
+    if (!user) return new Response(null, { status: 401 });
+    
+    const favorites = await env.DB.prepare(`
+        SELECT d.* FROM favorites f
+        JOIN documents d ON f.document_id = d.id
+        WHERE f.user_id = ?
+    `).bind(user.sub).all();
+    
+    return Response.json(favorites.results);
+});
+
+router.post('/api/user/favorites', async (request, env) => {
+    const user = await verifyAuth(request, env);
+    if (!user) return new Response(null, { status: 401 });
+    
+    const { document_id } = await request.json();
+    await env.DB.prepare(`
+        INSERT OR IGNORE INTO favorites (user_id, document_id)
+        VALUES (?, ?)
+    `).bind(user.sub, document_id).run();
+    
+    return new Response(null, { status: 204 });
+});
+
+router.delete('/api/user/favorites/:document_id', async (request, env) => {
+    const user = await verifyAuth(request, env);
+    if (!user) return new Response(null, { status: 401 });
+    
+    const { document_id } = request.params;
+    await env.DB.prepare(`
+        DELETE FROM favorites WHERE user_id = ? AND document_id = ?
+    `).bind(user.sub, document_id).run();
+    
+    return new Response(null, { status: 204 });
+});
+
+// Notes
+router.get('/api/docs/:id/notes', async (request, env) => {
+    const user = await verifyAuth(request, env);
+    if (!user) return new Response(null, { status: 401 });
+    
+    const { id } = request.params;
+    const notes = await env.DB.prepare(`
+        SELECT * FROM notes 
+        WHERE document_id = ? AND (user_id = ? OR visibility = 'shared')
+    `).bind(id, user.sub).all();
+    
+    return Response.json(notes.results);
+});
+
+router.post('/api/docs/:id/notes', async (request, env) => {
+    const user = await verifyAuth(request, env);
+    if (!user) return new Response(null, { status: 401 });
+    
+    const { id } = request.params;
+    const { content, visibility = 'private' } = await request.json();
+    const noteId = nanoid();
+    
+    await env.DB.prepare(`
+        INSERT INTO notes (id, user_id, document_id, content, visibility)
+        VALUES (?, ?, ?, ?, ?)
+    `).bind(noteId, user.sub, id, content, visibility).run();
+    
+    return Response.json({ id: noteId });
+});
+
+router.put('/api/notes/:id', async (request, env) => {
+    const user = await verifyAuth(request, env);
+    if (!user) return new Response(null, { status: 401 });
+    
+    const { id } = request.params;
+    const { content, visibility } = await request.json();
+    
+    // Check ownership
+    const note = await env.DB.prepare(`
+        SELECT * FROM notes WHERE id = ? AND user_id = ?
+    `).bind(id, user.sub).first();
+    
+    if (!note) return new Response('Not found', { status: 404 });
+    
+    await env.DB.prepare(`
+        UPDATE notes SET content = ?, visibility = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+    `).bind(content, visibility, id).run();
+    
+    return new Response(null, { status: 204 });
+});
+
+router.delete('/api/notes/:id', async (request, env) => {
+    const user = await verifyAuth(request, env);
+    if (!user) return new Response(null, { status: 401 });
+    
+    const { id } = request.params;
+    
+    // Check ownership
+    const result = await env.DB.prepare(`
+        DELETE FROM notes WHERE id = ? AND user_id = ?
+    `).bind(id, user.sub).run();
+    
+    if (result.changes === 0) return new Response('Not found', { status: 404 });
+    return new Response(null, { status: 204 });
+});
+
+// Admin upload
+router.post('/api/admin/upload', async (request, env) => {
+    const user = await verifyAuth(request, env);
+    if (!user) return new Response(null, { status: 401 });
+    
+    const adminCheck = requireAdmin(user);
+    if (adminCheck) return adminCheck;
+    
+    // Rate limiting
+    const rateLimitKey = `upload:${user.sub}`;
+    const rateLimit = await env.KV_RATE_LIMIT.get(rateLimitKey);
+    if (rateLimit && parseInt(rateLimit) > 5) {
+        return new Response('Rate limit exceeded', { status: 429 });
+    }
+    
+    // Process multipart upload
+    const formData = await request.formData();
+    const file = formData.get('file');
+    if (!file) return new Response('No file', { status: 400 });
+    
+    const r2Key = nanoid();
+    await env.MY_R2.put(r2Key, file.stream(), {
+        httpMetadata: { contentType: file.type }
+    });
+    
+    // Update rate limit
+    await env.KV_RATE_LIMIT.put(rateLimitKey, '1', { expirationTtl: 3600 });
+    
+    return Response.json({ r2_key: r2Key });
+});
+
+// Admin create document
+router.post('/api/docs', async (request, env) => {
+    const user = await verifyAuth(request, env);
+    if (!user) return new Response(null, { status: 401 });
+    
+    const adminCheck = requireAdmin(user);
+    if (adminCheck) return adminCheck;
+    
+    const data = await request.json();
+    const id = nanoid();
+    
+    await env.DB.prepare(`
+        INSERT INTO documents (id, title, summary, author, language, tags, topics, 
+                              r2_key, mime_type, size_bytes, visibility, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+        id, data.title, data.summary, data.author, data.language, 
+        JSON.stringify(data.tags || []), data.topics, data.r2_key, 
+        data.mime_type, data.size_bytes, data.visibility || 'public', user.sub
+    ).run();
+    
+    // Insert tags
+    if (data.tags) {
+        for (const tag of data.tags) {
+            await env.DB.prepare(`
+                INSERT INTO document_tags (document_id, tag) VALUES (?, ?)
+            `).bind(id, tag).run();
+        }
+    }
+    
+    // Trigger extraction
+    if (env.EXTRACTION_WEBHOOK) {
+        await fetch(env.EXTRACTION_WEBHOOK, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ document_id: id, r2_key: data.r2_key })
+        });
+    }
+    
+    return Response.json({ id });
+});
 
 export default {
     async fetch(request, env, ctx) {
         return router.handle(request, env, ctx).catch(err => {
+            console.error(err);
             return new Response('Internal Server Error', { status: 500 });
         });
     },
