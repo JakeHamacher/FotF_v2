@@ -1,0 +1,26 @@
+name = "document-library"
+compatibility_date = "2025-11-24"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "document-library"
+database_id = ""
+
+[[r2_buckets]]
+binding = "MY_R2"
+bucket_name = "documents"
+
+[[kv_namespaces]]
+binding = "KV_RATE_LIMIT"
+id = ""
+
+[env.vars]
+OAUTH_CLIENT_ID = ""
+OAUTH_CLIENT_SECRET = ""
+OAUTH_AUTH_URL = ""
+OAUTH_TOKEN_URL = ""
+OAUTH_USERINFO_URL = ""
+SESSION_JWT_SECRET = ""
+ADMIN_WHITELIST = ""
+EXTRACTION_WEBHOOK = ""
