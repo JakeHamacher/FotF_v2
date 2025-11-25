@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Documents</title>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="container">
+    <h2>Your Documents</h2>
+    <div id="docs"></div>
+
+    <script>
+      fetch("/api/docs").then(r => r.json()).then(data => {
+        const el = document.getElementById("docs");
+        if (data.length === 0) {
+          el.innerHTML = "<p>No documents yet.</p>";
+        } else {
+          el.innerHTML = data.map(d => `
+            <p><a href="${d.url}" target="_blank">${d.filename}</a></p>
+          `).join('');
+        }
+      });
+    </script>
+
+    <a href="/dashboard.html"><button>Admin Dashboard</button></a>
+    <a href="/logout"><button style="margin-top:10px;background:#ef4444;">Logout</button></a>
+  </div>
+</body>
+</html>
