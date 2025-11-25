@@ -3,20 +3,57 @@
 <head>
   <title>Documents</title>
   <link rel="stylesheet" href="/styles.css">
+  <style>
+    .docs-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .doc-card {
+      background: white;
+      border-radius: 8px;
+      padding: 16px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      text-align: center;
+      border: 1px solid #e1e4e8;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .doc-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    }
+    .doc-card a {
+      text-decoration: none;
+      color: #2563eb;
+      font-weight: 500;
+      word-break: break-word;
+    }
+    .doc-card a:hover {
+      text-decoration: underline;
+    }
+    .no-docs {
+      text-align: center;
+      color: #6b7280;
+      font-style: italic;
+    }
+  </style>
 </head>
 <body>
   <div class="container">
     <h2>Your Documents</h2>
-    <div id="docs"></div>
+    <div id="docs" class="docs-grid"></div>
 
     <script>
       fetch("/api/docs").then(r => r.json()).then(data => {
         const el = document.getElementById("docs");
         if (data.length === 0) {
-          el.innerHTML = "<p>No documents yet.</p>";
+          el.innerHTML = '<p class="no-docs">No documents yet.</p>';
         } else {
           el.innerHTML = data.map(d => `
-            <p><a href="${d.url}" target="_blank">${d.filename}</a></p>
+            <div class="doc-card">
+              <a href="${d.url}" target="_blank">${d.filename}</a>
+            </div>
           `).join('');
         }
       });
